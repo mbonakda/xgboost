@@ -79,6 +79,7 @@ struct TrainParam : public dmlc::Parameter<TrainParam> {
   bool refresh_leaf;
   // auxiliary data structure
   std::vector<int> monotone_constraints;
+  std::vector<int> reshape_idx;
   // gpu to use for single gpu algorithms
   int gpu_id;
   // declare the parameters
@@ -188,6 +189,9 @@ struct TrainParam : public dmlc::Parameter<TrainParam> {
     DMLC_DECLARE_FIELD(monotone_constraints)
         .set_default(std::vector<int>())
         .describe("Constraint of variable monotonicity");
+    DMLC_DECLARE_FIELD(reshape_idx)
+        .set_default(std::vector<int>())
+        .describe("Shape-constrained variable indices");
     DMLC_DECLARE_FIELD(gpu_id)
         .set_lower_bound(0)
         .set_default(0)

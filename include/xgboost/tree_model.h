@@ -19,6 +19,11 @@
 #include "./logging.h"
 #include "./feature_map.h"
 
+#include <unordered_map>
+#include <limits>
+#include "fusion.h"
+#include <memory>
+
 namespace xgboost {
 
 /*! \brief meta parameters of the tree */
@@ -69,6 +74,8 @@ struct TreeParam : public dmlc::Parameter<TreeParam> {
 template<typename TSplitCond, typename TNodeStat>
 class TreeModel {
  public:
+  // nid --> feat id --> interval 
+  std::vector<std::vector<std::pair<double, double>>> cells;
   /*! \brief data type to indicate split condition */
   typedef TNodeStat  NodeStat;
   /*! \brief auxiliary statistics of node to help tree building */
@@ -199,6 +206,8 @@ class TreeModel {
   std::vector<TNodeStat> stats;
   // leaf vector, that is used to store additional information
   std::vector<bst_float> leaf_vector;
+
+
   // allocate a new node,
   // !!!!!! NOTE: may cause BUG here, nodes.resize
   inline int AllocNode() {
@@ -214,6 +223,7 @@ class TreeModel {
     nodes.resize(param.num_nodes);
     stats.resize(param.num_nodes);
     leaf_vector.resize(param.num_nodes * param.size_leaf_vector);
+	cells.resize(param.num_nodes);
     return nd;
   }
   // delete a tree node, keep the parent field to allow trace back
@@ -299,6 +309,14 @@ class TreeModel {
       nodes[i].set_leaf(0.0f);
       nodes[i].set_parent(-1);
     }
+
+	CHECK_EQ(param.num_nodes, 1); // TODO: why would num_nodes be > 0 ? (MB)
+	cells.push_back(std::vector<std::pair<double,double>>());
+	size_t num_vars = param.num_feature;
+	for( int i = 0; i < num_vars; ++i )  {
+		cells[0].push_back(std::pair<double,double>(-1 * std::numeric_limits<float>::infinity(), std::numeric_limits<float>::infinity()));
+	}
+
   }
   /*!
    * \brief load model from stream
@@ -413,6 +431,7 @@ struct RTreeNodeStat {
  */
 class RegTree: public TreeModel<bst_float, RTreeNodeStat> {
  public:
+  std::vector<int> reshape_idx;
   /*!
    * \brief dense feature vector that can be taken by RegTree
    * and can be construct from sparse feature vector.
@@ -507,12 +526,234 @@ class RegTree: public TreeModel<bst_float, RTreeNodeStat> {
    */
   inline void FillNodeMeanValues();
 
+  /*!
+   * \brief monotonic reshaping
+   */
+  inline void Reshape();
+  inline std::vector<int> get_leaves(int nid);
+  inline std::vector<std::pair<int,int>> find_intersections( int nid );
+  inline void goldilocks_opt(const std::set<int> & leaves, const std::vector<std::pair<int, int>> & id_edges);
+  std::vector<int> sc_nids;
+  std::unordered_map<int, std::vector<int>> left_children;
+  std::unordered_map<int, std::vector<int>> right_children;
+
  private:
   inline bst_float FillNodeMeanValue(int nid);
 
   std::vector<bst_float> node_mean_values;
 };
 
+inline std::vector<int> RegTree::get_leaves( int nid ) {
+    std::vector<int> result;
+
+    int left_id    = nodes[nid].cleft();
+    int right_id   = nodes[nid].cright();
+
+    if( left_id <= 0 && right_id <= 0 ) {
+        result.push_back(nid);
+        return(result);
+    }
+
+    std::vector<int> leftData, rightData;
+
+    auto got_left  = left_children.find(nid);
+    if( got_left != left_children.end() ) {
+        leftData = got_left->second;
+    } else {
+        leftData  = get_leaves(left_id);
+    }
+
+    auto got_right = right_children.find(nid);
+    if( got_right != right_children.end() ) {
+        rightData = got_right->second;
+    } else {
+        rightData         = get_leaves(right_id);
+    }
+
+    result.insert(result.end(), leftData.begin(), leftData.end());
+    result.insert(result.end(), rightData.begin(), rightData.end());
+
+    return(result);
+}
+
+inline std::vector<std::pair<int,int>> RegTree::find_intersections( int nid ) {
+	std::vector<std::pair<int, int>> result;
+	auto l_leaves = left_children[nid];
+	auto r_leaves = right_children[nid];
+	for( int l_idx = 0; l_idx < l_leaves.size(); ++l_idx ) {
+		int l_leafID = l_leaves[l_idx];
+		std::vector<std::pair<double, double>> l_cell = cells[l_leafID]; // TODO: avoid copy
+		for( int r_idx = 0; r_idx < r_leaves.size(); ++r_idx ) {
+			size_t r_leafID = r_leaves[r_idx];
+			std::vector<std::pair<double, double>> r_cell = cells[r_leafID]; // TODO: avoid copy
+			bool intersect = true;
+			for( int d_idx = 0; d_idx < l_cell.size(); ++d_idx )  {
+
+				// skip shape-constrained dimensions
+				if(reshape_idx[d_idx]) {
+					continue;
+				}
+
+				double i0 = std::max( l_cell[d_idx].first, r_cell[d_idx].first);
+				double i1 = std::min( l_cell[d_idx].second, r_cell[d_idx].second);
+				if(i0 >= i1) {
+					intersect = false;
+                    /*
+					std::cout << "does not intersect. dimension = " << d_idx << std::endl;
+					std::cout << "left: ";
+					for( size_t i = 0; i < cells[l_leafID].size(); ++i ) {
+						std::cout << "[" << i << ": (" << cells[l_leafID][i].first << "," << cells[l_leafID][i].second << ")] ";
+					}
+					std::cout << std::endl;
+
+					std::cout << "right: ";
+					for( size_t i = 0; i < cells[r_leafID].size(); ++i ) {
+						std::cout << "[" << i << ": (" << cells[r_leafID][i].first << "," << cells[r_leafID][i].second << ")] ";
+					}
+					std::cout << std::endl;
+                    */
+
+					break;
+				}
+			}
+			if( intersect ) {
+				result.push_back(std::pair<int, int>(l_leafID, r_leafID));
+
+				/*
+				std::cout << "INTERSECTS " << std::endl;
+				std::cout << "left: ";
+				for( size_t i = 0; i < cells[l_leafID].size(); ++i ) {
+					std::cout << "[" << i << ": (" << cells[l_leafID][i].first << "," << cells[l_leafID][i].second << ")] ";
+				}
+				std::cout << std::endl;
+
+				std::cout << "right: ";
+				for( size_t i = 0; i < cells[r_leafID].size(); ++i ) {
+					std::cout << "[" << i << ": (" << cells[r_leafID][i].first << "," << cells[r_leafID][i].second << ")] ";
+				}
+				std::cout << std::endl;
+				*/
+			}
+		}
+	}
+	return(result);
+}
+
+inline void RegTree::Reshape() {
+    std::cout << "reshaping" << std::endl;
+
+    // 1. for each shape-constrained node, determine left/right children
+    for( auto & nid : sc_nids ) {
+        std::vector<int> left  = get_leaves( nodes[nid].cleft() );
+        left_children[nid]     = left;
+        std::vector<int> right = get_leaves( nodes[nid].cright() );
+        right_children[nid]    = right;
+    }
+
+	// 2. find intersections for each set of leaves
+	std::vector<std::pair<int, int>> intersections;
+	for (auto& nn : sc_nids) {
+		std::vector<std::pair<int, int>>   tmp_int = find_intersections( nn );
+		intersections.insert(intersections.end(), tmp_int.begin(), tmp_int.end() );
+	}
+
+    // 3. exact estimator
+    std::set<int> leaf_ids;
+    for (auto& nn : sc_nids) {
+        for(auto& ii: left_children[nn]) {
+            leaf_ids.insert(ii);
+        }
+        for(auto& ii: right_children[nn]) {
+            leaf_ids.insert(ii);
+        }
+    }
+
+    goldilocks_opt(leaf_ids, intersections);
+}
+
+inline void RegTree::goldilocks_opt(const std::set<int> & leaves, const std::vector<std::pair<int, int>> & id_edges) {
+ double DIVIDE_MULT = 1;
+
+  std::unordered_map<int, int> id_to_idx;
+  auto v = new_array_ptr<double,1>(leaves.size());
+
+  size_t idx = 0;
+  for( auto l : leaves ) {
+    (*v)[idx]    = nodes[l].leaf_value()/DIVIDE_MULT;
+    id_to_idx[l] = idx;
+    idx++;
+  }
+
+  std::vector<std::pair<int, int>> idx_edges;
+  for( auto e : id_edges ) {
+    //std::cout << "constraint," << e.first << "," << e.second << std::endl;
+    idx_edges.push_back(std::pair<int,int>(id_to_idx[e.first], id_to_idx[e.second]));
+  }
+
+
+  size_t num_vars = v->size() + 2; // 2 dummy variables
+  auto c          = new_array_ptr<double,1>(num_vars);
+  (*c)[0] = 0;
+  (*c)[1] = 1;
+  for( size_t ii = 2; ii < c->size(); ++ii ) {
+      (*c)[ii] = -1*(*v)[ii-2];
+  }
+
+  size_t num_constraints = idx_edges.size();
+
+  auto rows   = new_array_ptr<int,1>(2*num_constraints);
+  for(size_t ii = 0; ii < rows->size(); ++ii) {
+    (*rows)[ii] = int(ii/2); // each row appears twice for each constraint
+  }
+ auto cols   = new_array_ptr<int,1>(2*num_constraints);
+  auto values = new_array_ptr<double,1>(2*num_constraints);
+  for( int ii = 0; ii < idx_edges.size(); ++ii ) {
+    (*cols)[(2*ii)]         = idx_edges[ii].first + 2;
+    (*values)[2*ii]         = -1;
+    (*cols)[(2*ii)+1]       = idx_edges[ii].second + 2;
+    (*values)[(2*ii)+1]     = 1;
+  }
+
+  auto A = Matrix::sparse(num_constraints, num_vars, rows, cols, values);
+
+
+  Model::t M     = new Model("rrf"); auto _M = finally([&]() { M->dispose(); });
+  M->setLogHandler([=](const std::string & msg) { std::cout << msg << std::flush; } );
+
+  Variable::t x0  = M->variable("x0", 1, Domain::equalsTo(1.));
+  Variable::t x1  = M->variable("x1", 1, Domain::greaterThan(0.));
+  Variable::t x2  = M->variable("x2", num_vars-2, Domain::unbounded());
+
+  Variable::t z1 = Var::vstack(x0, x1, x2);
+
+  Constraint::t qc = M->constraint("qc", z1, Domain::inRotatedQCone());
+  M->constraint("mono", Expr::mul(A,z1),Domain::greaterThan(0.));
+
+  M->objective("obj", ObjectiveSense::Minimize, Expr::dot(c,z1));
+  try {
+    auto t1 = std::chrono::high_resolution_clock::now();
+    M->solve();
+    auto t2 = std::chrono::high_resolution_clock::now();
+
+    /*
+    std::cout << "mosek solve took "
+      << std::chrono::duration_cast<std::chrono::seconds>(t2-t1).count()
+      << " seconds\n";
+      */
+
+    //std::cout << "mosek status = " << M->getPrimalSolutionStatus() << std::endl;
+
+    ndarray<double,1> xlvl   = *(x2->level());
+    for( auto p : id_to_idx ) {
+      double new_val = xlvl[p.second]*DIVIDE_MULT;
+      //double old_val = split_values[p.first];
+	  nodes[p.first].set_leaf(new_val);
+    }
+
+  }  catch(const FusionException &e) {
+    std::cout << "caught an exception" << std::endl;
+  }
+}
 // implementations of inline functions
 // do not need to read if only use the model
 inline void RegTree::FVec::Init(size_t size) {

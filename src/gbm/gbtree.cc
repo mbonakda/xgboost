@@ -46,6 +46,7 @@ struct GBTreeTrainParam : public dmlc::Parameter<GBTreeTrainParam> {
   int process_type;
   // flag to print out detailed breakdown of runtime
   int debug_verbose;
+  std::vector<int> reshape_idx;
   // declare parameters
   DMLC_DECLARE_PARAMETER(GBTreeTrainParam) {
     DMLC_DECLARE_FIELD(num_parallel_tree)
@@ -66,6 +67,9 @@ struct GBTreeTrainParam : public dmlc::Parameter<GBTreeTrainParam> {
         .set_lower_bound(0)
         .set_default(0)
         .describe("flag to print out detailed breakdown of runtime");
+    DMLC_DECLARE_FIELD(reshape_idx)
+        .set_default(std::vector<int>())
+        .describe("Shape-constrained variable indices");
     // add alias
     DMLC_DECLARE_ALIAS(updater_seq, updater);
   }
@@ -250,6 +254,9 @@ class GBTree : public GradientBooster {
     if (ngroup == 1) {
       std::vector<std::unique_ptr<RegTree> > ret;
       BoostNewTrees(gpair, p_fmat, 0, &ret);
+      for( auto & t : ret ) {
+          t->Reshape();
+      }
       new_trees.push_back(std::move(ret));
     } else {
       CHECK_EQ(gpair.size() % ngroup, 0U)
@@ -266,6 +273,7 @@ class GBTree : public GradientBooster {
         new_trees.push_back(std::move(ret));
       }
     }
+
     double tstart = dmlc::GetTime();
     for (int gid = 0; gid < ngroup; ++gid) {
       this->CommitModel(std::move(new_trees[gid]), gid);
@@ -461,6 +469,7 @@ class GBTree : public GradientBooster {
       if (tparam.process_type == kDefault) {
         // create new tree
         std::unique_ptr<RegTree> ptr(new RegTree());
+		ptr->reshape_idx = tparam.reshape_idx;
         ptr->param.InitAllowUnknown(this->cfg);
         ptr->InitModel();
         new_trees.push_back(ptr.get());

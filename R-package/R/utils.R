@@ -66,12 +66,21 @@ check.booster.params <- function(params, ...) {
   }
   
   # monotone_constraints parser
-  
   if (!is.null(params[['monotone_constraints']]) &&
       typeof(params[['monotone_constraints']]) != "character") {
         vec2str = paste(params[['monotone_constraints']], collapse = ',')
         vec2str = paste0('(', vec2str, ')')
         params[['monotone_constraints']] = vec2str
+  }
+
+  # reshape_idx parser
+  if (!is.null(params[['reshape_idx']]) &&
+      typeof(params[['reshape_idx']]) != "character") {
+        vec2str = paste(params[['reshape_idx']], collapse = ',')
+        vec2str = paste0('(', vec2str, ')')
+        params[['reshape_idx']] = vec2str
+        print('found reshape_idx in args')
+        print(vec2str)
   }
   
   return(params)

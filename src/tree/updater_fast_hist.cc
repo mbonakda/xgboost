@@ -53,6 +53,7 @@ class FastHistMaker: public TreeUpdater {
   void Update(const std::vector<bst_gpair>& gpair,
               DMatrix* dmat,
               const std::vector<RegTree*>& trees) override {
+    std::cout << "Update() -- fast_hist" << std::endl;
     TStats::CheckInfo(dmat->info());
     if (is_gmat_initialized_ == false) {
       double tstart = dmlc::GetTime();
