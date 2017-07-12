@@ -29,7 +29,6 @@ class ColMaker: public TreeUpdater {
   void Update(const std::vector<bst_gpair> &gpair,
               DMatrix* dmat,
               const std::vector<RegTree*> &trees) override {
-    std::cout << "Update() -- colmaker" << std::endl;
     TStats::CheckInfo(dmat->info());
     // rescale learning rate according to size of trees
     float lr = param.learning_rate;
@@ -37,7 +36,6 @@ class ColMaker: public TreeUpdater {
     TConstraint::Init(&param, dmat->info().num_col);
     // build tree
     for (size_t i = 0; i < trees.size(); ++i) {
-      std::cout << "builder loop" << std::endl;
       Builder builder(param);
       builder.Update(gpair, dmat, trees[i]);
     }
@@ -91,7 +89,6 @@ class ColMaker: public TreeUpdater {
       this->InitData(gpair, *p_fmat, *p_tree);
       this->InitNewNode(qexpand_, gpair, *p_fmat, *p_tree);
       for (int depth = 0; depth < param.max_depth; ++depth) {
-        std::cout << "depth loop" << std::endl;
         this->FindSplit(depth, qexpand_, gpair, p_fmat, p_tree);
         this->ResetPosition(qexpand_, p_fmat, *p_tree);
         this->UpdateQueueExpand(*p_tree, &qexpand_);
@@ -591,7 +588,6 @@ class ColMaker: public TreeUpdater {
       const MetaInfo& info = fmat.info();
       // start enumeration
       const bst_omp_uint nsize = static_cast<bst_omp_uint>(batch.size);
-      std::cout << "UpdateSolution(): nsize = " << nsize << std::endl;
       #if defined(_OPENMP)
       const int batch_size = std::max(static_cast<int>(nsize / this->nthread / 32), 1);
       #endif
@@ -628,7 +624,6 @@ class ColMaker: public TreeUpdater {
                           const std::vector<bst_gpair> &gpair,
                           DMatrix *p_fmat,
                           RegTree *p_tree) {
-      std::cout << "findSplit" << std::endl;
       std::vector<bst_uint> feat_set = feat_index;
       if (param.colsample_bylevel != 1.0f) {
         std::shuffle(feat_set.begin(), feat_set.end(), common::GlobalRandom());
@@ -640,7 +635,6 @@ class ColMaker: public TreeUpdater {
       }
       dmlc::DataIter<ColBatch>* iter = p_fmat->ColIterator(feat_set);
       while (iter->Next()) { 
-        std::cout << "findSplit->Next()" << std::endl;
         this->UpdateSolution(iter->Value(), gpair, *p_fmat);
       }
       // after this each thread's stemp will get the best candidates, aggregate results

@@ -20,9 +20,13 @@
 #include "./feature_map.h"
 
 #include <unordered_map>
+
 #include <limits>
 #include "fusion.h"
 #include <memory>
+
+using namespace mosek::fusion;
+using namespace monty;
 
 namespace xgboost {
 
@@ -640,35 +644,33 @@ inline std::vector<std::pair<int,int>> RegTree::find_intersections( int nid ) {
 }
 
 inline void RegTree::Reshape() {
-    std::cout << "reshaping" << std::endl;
+  // 1. for each shape-constrained node, determine left/right children
+  for( auto & nid : sc_nids ) {
+    std::vector<int> left  = get_leaves( nodes[nid].cleft() );
+    left_children[nid]     = left;
+    std::vector<int> right = get_leaves( nodes[nid].cright() );
+    right_children[nid]    = right;
+  }
 
-    // 1. for each shape-constrained node, determine left/right children
-    for( auto & nid : sc_nids ) {
-        std::vector<int> left  = get_leaves( nodes[nid].cleft() );
-        left_children[nid]     = left;
-        std::vector<int> right = get_leaves( nodes[nid].cright() );
-        right_children[nid]    = right;
+  // 2. find intersections for each set of leaves
+  std::vector<std::pair<int, int>> intersections;
+  for (auto& nn : sc_nids) {
+    std::vector<std::pair<int, int>>   tmp_int = find_intersections( nn );
+    intersections.insert(intersections.end(), tmp_int.begin(), tmp_int.end() );
+  }
+
+  // 3. exact estimator
+  std::set<int> leaf_ids;
+  for (auto& nn : sc_nids) {
+    for(auto& ii: left_children[nn]) {
+      leaf_ids.insert(ii);
     }
-
-	// 2. find intersections for each set of leaves
-	std::vector<std::pair<int, int>> intersections;
-	for (auto& nn : sc_nids) {
-		std::vector<std::pair<int, int>>   tmp_int = find_intersections( nn );
-		intersections.insert(intersections.end(), tmp_int.begin(), tmp_int.end() );
-	}
-
-    // 3. exact estimator
-    std::set<int> leaf_ids;
-    for (auto& nn : sc_nids) {
-        for(auto& ii: left_children[nn]) {
-            leaf_ids.insert(ii);
-        }
-        for(auto& ii: right_children[nn]) {
-            leaf_ids.insert(ii);
-        }
+    for(auto& ii: right_children[nn]) {
+      leaf_ids.insert(ii);
     }
+  }
 
-    goldilocks_opt(leaf_ids, intersections);
+  goldilocks_opt(leaf_ids, intersections);
 }
 
 inline void RegTree::goldilocks_opt(const std::set<int> & leaves, const std::vector<std::pair<int, int>> & id_edges) {
@@ -679,7 +681,8 @@ inline void RegTree::goldilocks_opt(const std::set<int> & leaves, const std::vec
 
   size_t idx = 0;
   for( auto l : leaves ) {
-    (*v)[idx]    = nodes[l].leaf_value()/DIVIDE_MULT;
+    //(*v)[idx]    = nodes[l].leaf_value()/DIVIDE_MULT;
+    (*v)[idx]    = nodes[l].leaf_value();
     id_to_idx[l] = idx;
     idx++;
   }
@@ -718,7 +721,7 @@ inline void RegTree::goldilocks_opt(const std::set<int> & leaves, const std::vec
 
 
   Model::t M     = new Model("rrf"); auto _M = finally([&]() { M->dispose(); });
-  M->setLogHandler([=](const std::string & msg) { std::cout << msg << std::flush; } );
+  //M->setLogHandler([=](const std::string & msg) { std::cout << msg << std::flush; } );
 
   Variable::t x0  = M->variable("x0", 1, Domain::equalsTo(1.));
   Variable::t x1  = M->variable("x1", 1, Domain::greaterThan(0.));
@@ -735,19 +738,15 @@ inline void RegTree::goldilocks_opt(const std::set<int> & leaves, const std::vec
     M->solve();
     auto t2 = std::chrono::high_resolution_clock::now();
 
-    /*
-    std::cout << "mosek solve took "
-      << std::chrono::duration_cast<std::chrono::seconds>(t2-t1).count()
-      << " seconds\n";
-      */
-
     //std::cout << "mosek status = " << M->getPrimalSolutionStatus() << std::endl;
 
     ndarray<double,1> xlvl   = *(x2->level());
     for( auto p : id_to_idx ) {
-      double new_val = xlvl[p.second]*DIVIDE_MULT;
-      //double old_val = split_values[p.first];
-	  nodes[p.first].set_leaf(new_val);
+      //double new_val = xlvl[p.second]*DIVIDE_MULT;
+      double new_val = xlvl[p.second];
+      double old_val = nodes[p.first].leaf_value();
+      //std::cout << old_val << "-->" << new_val << std::endl;
+      nodes[p.first].set_leaf(new_val);
     }
 
   }  catch(const FusionException &e) {

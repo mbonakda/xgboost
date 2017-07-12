@@ -79,8 +79,6 @@ check.booster.params <- function(params, ...) {
         vec2str = paste(params[['reshape_idx']], collapse = ',')
         vec2str = paste0('(', vec2str, ')')
         params[['reshape_idx']] = vec2str
-        print('found reshape_idx in args')
-        print(vec2str)
   }
   
   return(params)

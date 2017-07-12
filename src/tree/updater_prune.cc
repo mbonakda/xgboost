@@ -32,7 +32,6 @@ class TreePruner: public TreeUpdater {
   void Update(const std::vector<bst_gpair> &gpair,
               DMatrix *p_fmat,
               const std::vector<RegTree*> &trees) override {
-    std::cout << "Update() -- prune" << std::endl;
     // rescale learning rate according to size of trees
     float lr = param.learning_rate;
     param.learning_rate = lr / trees.size();

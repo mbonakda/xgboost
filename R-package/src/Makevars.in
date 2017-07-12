@@ -10,9 +10,9 @@ XGB_RFLAGS = -DXGBOOST_STRICT_R_MODE=1 -DDMLC_LOG_BEFORE_THROW=0\
            -DDMLC_LOG_CUSTOMIZE=1 -DXGBOOST_CUSTOMIZE_LOGGER=1\
            -DRABIT_CUSTOMIZE_MSG_ -DRABIT_STRICT_CXX98_
 
-PKG_CPPFLAGS=  -I$(PKGROOT)/include -I$(PKGROOT)/dmlc-core/include -I$(PKGROOT)/rabit/include -I$(PKGROOT) $(XGB_RFLAGS)
+PKG_CPPFLAGS=  -I$(PKGROOT)/include -I$(PKGROOT)/dmlc-core/include -I$(PKGROOT)/rabit/include -I$(PKGROOT) $(XGB_RFLAGS) -Wl,-rpath-link,/home/mbonakda/mosek/8/tools/platform/linux64x86/bin '-Wl,-rpath=/home/mbonakda/mosek/8/tools/platform/linux64x86/bin' -I/home/mbonakda/mosek/8/tools/platform/linux64x86/h -I/home/mbonakda/mosek/8/tools/platform/linux64x86/include -L/home/mbonakda/mosek/8/tools/platform/linux64x86/bin
 PKG_CXXFLAGS= @OPENMP_CXXFLAGS@ $(SHLIB_PTHREAD_FLAGS)
-PKG_LIBS = @OPENMP_CXXFLAGS@ $(SHLIB_PTHREAD_FLAGS)
+PKG_LIBS = @OPENMP_CXXFLAGS@ $(SHLIB_PTHREAD_FLAGS) -L/home/mbonakda/mosek/8/tools/platform/linux64x86/bin -Wl,-rpath-link,/home/mbonakda/mosek/8/tools/platform/linux64x86/bin '-Wl,-rpath=/home/mbonakda/mosek/8/tools/platform/linux64x86/bin' -lfusion64 -lmosek64
 OBJECTS= ./xgboost_R.o ./xgboost_custom.o ./xgboost_assert.o ./init.o\
          $(PKGROOT)/amalgamation/xgboost-all0.o $(PKGROOT)/amalgamation/dmlc-minimum0.o\
          $(PKGROOT)/rabit/src/engine_empty.o $(PKGROOT)/rabit/src/c_api.o
