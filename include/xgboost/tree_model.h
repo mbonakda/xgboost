@@ -644,33 +644,35 @@ inline std::vector<std::pair<int,int>> RegTree::find_intersections( int nid ) {
 }
 
 inline void RegTree::Reshape() {
-  // 1. for each shape-constrained node, determine left/right children
-  for( auto & nid : sc_nids ) {
-    std::vector<int> left  = get_leaves( nodes[nid].cleft() );
-    left_children[nid]     = left;
-    std::vector<int> right = get_leaves( nodes[nid].cright() );
-    right_children[nid]    = right;
-  }
-
-  // 2. find intersections for each set of leaves
-  std::vector<std::pair<int, int>> intersections;
-  for (auto& nn : sc_nids) {
-    std::vector<std::pair<int, int>>   tmp_int = find_intersections( nn );
-    intersections.insert(intersections.end(), tmp_int.begin(), tmp_int.end() );
-  }
-
-  // 3. exact estimator
-  std::set<int> leaf_ids;
-  for (auto& nn : sc_nids) {
-    for(auto& ii: left_children[nn]) {
-      leaf_ids.insert(ii);
+  if(sc_nids.size() > 0 ) {
+    // 1. for each shape-constrained node, determine left/right children
+    for( auto & nid : sc_nids ) {
+      std::vector<int> left  = get_leaves( nodes[nid].cleft() );
+      left_children[nid]     = left;
+      std::vector<int> right = get_leaves( nodes[nid].cright() );
+      right_children[nid]    = right;
     }
-    for(auto& ii: right_children[nn]) {
-      leaf_ids.insert(ii);
-    }
-  }
 
-  goldilocks_opt(leaf_ids, intersections);
+    // 2. find intersections for each set of leaves
+    std::vector<std::pair<int, int>> intersections;
+    for (auto& nn : sc_nids) {
+      std::vector<std::pair<int, int>>   tmp_int = find_intersections( nn );
+      intersections.insert(intersections.end(), tmp_int.begin(), tmp_int.end() );
+    }
+
+    // 3. exact estimator
+    std::set<int> leaf_ids;
+    for (auto& nn : sc_nids) {
+      for(auto& ii: left_children[nn]) {
+        leaf_ids.insert(ii);
+      }
+      for(auto& ii: right_children[nn]) {
+        leaf_ids.insert(ii);
+      }
+    }
+
+    goldilocks_opt(leaf_ids, intersections);
+  }
 }
 
 inline void RegTree::goldilocks_opt(const std::set<int> & leaves, const std::vector<std::pair<int, int>> & id_edges) {
